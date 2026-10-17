@@ -14,11 +14,6 @@ from typing import Any
 
 import numpy as np
 
-try:
-    from sentence_transformers import SentenceTransformer
-except ImportError:
-    SentenceTransformer = None  # type: ignore
-
 logger = logging.getLogger(__name__)
 
 
@@ -64,22 +59,20 @@ class Embedder:
             logger.info("LOW_MEMORY_EMBEDDER enabled — using zero-overhead 384-dim hash embedder (< 50MB RAM).")
             return
 
-        if SentenceTransformer is not None:
-            try:
-                logger.info("Loading SentenceTransformer model '%s' …", model_name)
-                loaded_model = SentenceTransformer(model_name)
-                dim_val = getattr(loaded_model, "get_sentence_embedding_dimension", lambda: 384)()
-                self._dim = int(dim_val) if dim_val else 384
-                self.model = loaded_model
-                logger.info("Model loaded — embedding dimension = %d", self._dim)
-            except Exception as exc:
-                logger.warning(
-                    "Could not load SentenceTransformer (%s). Falling back to zero-overhead 384-dim embedder.",
-                    exc,
-                )
-                self.model = None
-        else:
-            logger.info("SentenceTransformer not installed in environment — using lightweight 384-dim embedder.")
+        try:
+            from sentence_transformers import SentenceTransformer  # type: ignore
+            logger.info("Loading SentenceTransformer model '%s' …", model_name)
+            loaded_model = SentenceTransformer(model_name)
+            dim_val = getattr(loaded_model, "get_sentence_embedding_dimension", lambda: 384)()
+            self._dim = int(dim_val) if dim_val else 384
+            self.model = loaded_model
+            logger.info("Model loaded — embedding dimension = %d", self._dim)
+        except Exception as exc:
+            logger.warning(
+                "SentenceTransformer unavailable (%s). Using zero-overhead 384-dim embedder.",
+                exc,
+            )
+            self.model = None
 
     @property
     def dimension(self) -> int:
