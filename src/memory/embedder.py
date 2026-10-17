@@ -1,5 +1,5 @@
 """
-SentenceTransformer embedder — wraps all-MiniLM-L6-v2 (384-dim).
+SentenceTransformer embedder — wraps all-MiniLM-L6-v2 (384-dim) with low-memory support.
 
 The model is loaded once at startup and reused for every embedding request.
 Embeddings are L2-normalised so dot-product equals cosine similarity.
@@ -10,8 +10,14 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+from typing import Any
 
 import numpy as np
+
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:
+    SentenceTransformer = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +41,8 @@ def _lightweight_encode(text: str, dim: int = 384) -> list[float]:
         sign = 1.0 if ((h >> 16) & 1) == 0 else -1.0
         vec[idx] += sign
 
-    norm = np.linalg.norm(vec)
-    if norm > 0:
+    norm = float(np.linalg.norm(vec))
+    if norm > 0.0:
         vec = vec / norm
     else:
         vec[0] = 1.0
@@ -45,6 +51,9 @@ def _lightweight_encode(text: str, dim: int = 384) -> list[float]:
 
 class Embedder:
     """Thread-safe embedding wrapper with low-memory cloud support."""
+
+    model: Any
+    _dim: int
 
     def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
         self._dim = 384
@@ -55,18 +64,22 @@ class Embedder:
             logger.info("LOW_MEMORY_EMBEDDER enabled — using zero-overhead 384-dim hash embedder (< 50MB RAM).")
             return
 
-        try:
-            from sentence_transformers import SentenceTransformer
-            logger.info("Loading SentenceTransformer model '%s' …", model_name)
-            self.model = SentenceTransformer(model_name)
-            self._dim = self.model.get_sentence_embedding_dimension()
-            logger.info("Model loaded — embedding dimension = %d", self._dim)
-        except Exception as exc:
-            logger.warning(
-                "Could not load SentenceTransformer (%s). Falling back to zero-overhead 384-dim embedder.",
-                exc,
-            )
-            self.model = None
+        if SentenceTransformer is not None:
+            try:
+                logger.info("Loading SentenceTransformer model '%s' …", model_name)
+                loaded_model = SentenceTransformer(model_name)
+                dim_val = getattr(loaded_model, "get_sentence_embedding_dimension", lambda: 384)()
+                self._dim = int(dim_val) if dim_val else 384
+                self.model = loaded_model
+                logger.info("Model loaded — embedding dimension = %d", self._dim)
+            except Exception as exc:
+                logger.warning(
+                    "Could not load SentenceTransformer (%s). Falling back to zero-overhead 384-dim embedder.",
+                    exc,
+                )
+                self.model = None
+        else:
+            logger.info("SentenceTransformer not installed in environment — using lightweight 384-dim embedder.")
 
     @property
     def dimension(self) -> int:
@@ -76,22 +89,22 @@ class Embedder:
     def encode(self, text: str) -> list[float]:
         """Encode text into a normalised 384-dim embedding vector."""
         if self.model is not None:
-            embedding: np.ndarray = self.model.encode(
+            embedding: Any = self.model.encode(
                 text,
                 normalize_embeddings=True,
                 show_progress_bar=False,
             )
-            return embedding.tolist()
+            return list(embedding.tolist() if hasattr(embedding, "tolist") else embedding)
         return _lightweight_encode(text, dim=self._dim)
 
     def encode_batch(self, texts: list[str]) -> list[list[float]]:
         """Encode multiple texts in a single forward pass."""
         if self.model is not None:
-            embeddings: np.ndarray = self.model.encode(
+            embeddings: Any = self.model.encode(
                 texts,
                 normalize_embeddings=True,
                 show_progress_bar=False,
                 batch_size=32,
             )
-            return embeddings.tolist()
+            return list(embeddings.tolist() if hasattr(embeddings, "tolist") else embeddings)
         return [_lightweight_encode(t, dim=self._dim) for t in texts]
