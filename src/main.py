@@ -21,7 +21,9 @@ from contextlib import asynccontextmanager
 
 import asyncpg
 import redis.asyncio as aioredis
+from pathlib import Path
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 
 from src.config import get_settings
 from src.api.routes import router as research_router
@@ -174,3 +176,13 @@ app = FastAPI(
 )
 
 app.include_router(research_router, tags=["Research"])
+
+STATIC_INDEX = Path(__file__).parent / "static" / "index.html"
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def serve_frontend() -> HTMLResponse:
+    """Serve the NexusResearch interactive dashboard."""
+    if STATIC_INDEX.exists():
+        return HTMLResponse(content=STATIC_INDEX.read_text(encoding="utf-8"))
+    return HTMLResponse("<h1>NexusResearch Dashboard</h1><p>Visit <a href='/docs'>/docs</a> for API documentation.</p>")
