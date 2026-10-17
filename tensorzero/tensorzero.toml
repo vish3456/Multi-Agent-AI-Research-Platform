@@ -1,0 +1,69 @@
+[gateway]
+bind_address = "0.0.0.0:3000"
+
+# Model definitions
+# 1. Groq (100% Free tier, ultra-fast Llama 3.3 / 3.1)
+[models.groq_llama]
+routing = ["groq"]
+[models.groq_llama.providers.groq]
+type = "openai"
+model_name = "openai/gpt-oss-120b"
+api_base = "https://api.groq.com/openai/v1"
+
+# 2. OpenAI (Optional paid fallback)
+[models.openai_gpt4o]
+routing = ["openai"]
+[models.openai_gpt4o.providers.openai]
+type = "openai"
+model_name = "gpt-4o"
+
+# --- Functions (one per agent node) ---
+
+# Node 1: Search Agent (Uses Free Groq as primary)
+[functions.search]
+type = "chat"
+[functions.search.variants.primary]
+type = "chat_completion"
+model = "groq_llama"
+weight = 100
+[functions.search.variants.fallback]
+type = "chat_completion"
+model = "openai_gpt4o"
+weight = 0
+
+# Node 2: Summarize Agent (Uses Free Groq as primary)
+[functions.summarize]
+type = "chat"
+[functions.summarize.variants.primary]
+type = "chat_completion"
+model = "groq_llama"
+weight = 100
+[functions.summarize.variants.fallback]
+type = "chat_completion"
+model = "openai_gpt4o"
+weight = 0
+
+# Node 3: Writer Agent (Uses Free Groq as primary)
+[functions.writer]
+type = "chat"
+[functions.writer.variants.primary]
+type = "chat_completion"
+model = "groq_llama"
+weight = 100
+[functions.writer.variants.fallback]
+type = "chat_completion"
+model = "openai_gpt4o"
+weight = 0
+
+# Node 4: Critic Agent & LLM Judge (Uses Free Groq as primary)
+[functions.critic]
+type = "chat"
+[functions.critic.variants.primary]
+type = "chat_completion"
+model = "groq_llama"
+weight = 100
+[functions.critic.variants.fallback]
+type = "chat_completion"
+model = "openai_gpt4o"
+weight = 0
+

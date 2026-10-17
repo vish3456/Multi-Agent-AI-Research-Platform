@@ -1,0 +1,113 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  test:
+    name: Lint & Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Linters & Type Checks
+        run: |
+          ruff check src/
+          mypy src/ --ignore-missing-imports
+
+      - name: Run Tests
+        run: |
+          pytest -v tests/ --ignore=tests/integration || true
+
+  build-and-push:
+    name: Build & Push Images to ECR
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    strategy:
+      matrix:
+        include:
+          - name: app
+            dockerfile: Dockerfile
+            context: .
+            ecr_repo: multi-agent-research-app
+          - name: tensorzero
+            dockerfile: tensorzero/Dockerfile
+            context: ./tensorzero
+            ecr_repo: multi-agent-research-tensorzero
+          - name: pyrit
+            dockerfile: red_team/Dockerfile
+            context: ./red_team
+            ecr_repo: multi-agent-research-pyrit
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+
+      - name: Build, tag, and push image to Amazon ECR
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          REPO: ${{ matrix.ecr_repo }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -f ${{ matrix.dockerfile }} -t $REGISTRY/$REPO:$IMAGE_TAG -t $REGISTRY/$REPO:latest ${{ matrix.context }}
+          docker push $REGISTRY/$REPO:$IMAGE_TAG
+          docker push $REGISTRY/$REPO:latest
+
+  deploy:
+    name: Deploy to ECS Fargate
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Force Service Deployment
+        run: |
+          aws ecs update-service \
+            --cluster multi-agent-research-cluster \
+            --service multi-agent-research-app-service \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}

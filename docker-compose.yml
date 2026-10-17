@@ -1,0 +1,78 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - API_KEY=${API_KEY:-dev-secret-key-123}
+      - APP_PORT=8000
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql://postgres:localdev@postgres:5432/research_platform
+      - GUARDRAIL_ID=${GUARDRAIL_ID:-mock-guardrail-id}
+      - GUARDRAIL_VERSION=${GUARDRAIL_VERSION:-DRAFT}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - TENSORZERO_URL=http://tensorzero:3000
+      - EMBEDDING_MODEL=all-MiniLM-L6-v2
+      - EMBEDDING_DIM=384
+      - CACHE_SIMILARITY_THRESHOLD=0.85
+      - LTM_EXACT_THRESHOLD=0.88
+      - LTM_RELATED_THRESHOLD=0.50
+      - RATE_LIMIT_MAX=10
+      - RATE_LIMIT_WINDOW=60
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+      - LANGSMITH_PROJECT=multi-agent-research
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      tensorzero:
+        condition: service_started
+    restart: unless-stopped
+
+  tensorzero:
+    build:
+      context: ./tensorzero
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-mock-openai-key}
+      - GROQ_API_KEY=${GROQ_API_KEY:-mock-groq-key}
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg15
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: research_platform
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: localdev
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d research_platform"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  postgres_data:
